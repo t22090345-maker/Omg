@@ -1,0 +1,236 @@
+name: Generate Auto Call Assistant APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Generate Android Project Files Automatically
+        run: |
+          mkdir -p app/src/main/java/com/aicall/assistant
+          mkdir -p app/src/main/res/layout
+          mkdir -p app/src/main/res/values
+
+          # 1. Build Gradle Root
+          cat << 'EOF' > build.gradle
+          buildscript {
+              repositories { google(); mavenCentral() }
+              dependencies { classpath 'com.android.tools.build:gradle:8.2.2'; classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22' }
+          }
+          allprojects { repositories { google(); mavenCentral() } }
+          EOF
+
+          # 2. Settings Gradle
+          cat << 'EOF' > settings.gradle
+          include ':app'
+          EOF
+
+          # 3. App Build Gradle
+          cat << 'EOF' > app/build.gradle
+          plugins {
+              id 'com.android.application'
+              id 'org.jetbrains.kotlin.android'
+          }
+          android {
+              namespace 'com.aicall.assistant'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.aicall.assistant"
+                  minSdk 26
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = '17'
+              }
+          }
+          dependencies {
+              implementation 'androidx.core:core-ktx:1.12.0'
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+              implementation 'com.google.android.material:material:1.11.0'
+          }
+          EOF
+
+          # 4. Android Manifest
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              package="com.aicall.assistant">
+
+              <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
+              <uses-permission android:name="android.permission.READ_CALL_LOG"/>
+              <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS"/>
+              <uses-permission android:name="android.permission.MANAGE_OWN_CALLS"/>
+              <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+
+              <application
+                  android:allowBackup="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:label="AI Call Assistant"
+                  android:theme="@style/Theme.MaterialComponents.DayNight.DarkActionBar">
+
+                  <activity android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <service
+                      android:name=".CustomCallScreeningService"
+                      android:permission="android.permission.BIND_SCREENING_SERVICE"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.telecom.CallScreeningService" />
+                      </intent-filter>
+                  </service>
+
+              </application>
+          </manifest>
+          EOF
+
+          # 5. MainActivity Kotlin File
+          cat << 'EOF' > app/src/main/java/com/aicall/assistant/MainActivity.kt
+          package com.aicall.assistant
+
+          import android.app.role.RoleManager
+          import android.content.Context
+          import android.content.Intent
+          import android.os.Build
+          import android.os.Bundle
+          import android.widget.Button
+          import android.widget.EditText
+          import android.widget.Toast
+          import androidx.appcompat.app.AppCompatActivity
+
+          class MainActivity : AppCompatActivity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContentView(R.layout.activity_main)
+
+                  requestDefaultDialerRole()
+
+                  val etNumber = findViewById<EditText>(R.id.etPhoneNumber)
+                  val btnAdd = findViewById<Button>(R.id.btnAddNumber)
+
+                  btnAdd.setOnClickListener {
+                      val num = etNumber.text.toString().trim()
+                      if (num.isNotEmpty()) {
+                          val prefs = getSharedPreferences("AI_CALL_PREFS", Context.MODE_PRIVATE)
+                          val set = prefs.getStringSet("AI_NUMBERS", mutableSetOf()) ?: mutableSetOf()
+                          val newSet = HashSet(set)
+                          newSet.add(num)
+                          prefs.edit().putStringSet("AI_NUMBERS", newSet).apply()
+                          Toast.makeText(this, "Number AI Screening List Me Add Ho Gaya", Toast.LENGTH_SHORT).show()
+                          etNumber.text.clear()
+                      }
+                  }
+              }
+
+              private fun requestDefaultDialerRole() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                      val roleManager = getSystemService(RoleManager::class.java)
+                      if (roleManager != null && !roleManager.isRoleHeld(RoleManager.ROLE_DIALER)) {
+                          val intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_DIALER)
+                          startActivityForResult(intent, 1001)
+                      }
+                  }
+              }
+          }
+          EOF
+
+          # 6. Call Screening Service
+          cat << 'EOF' > app/src/main/java/com/aicall/assistant/CustomCallScreeningService.kt
+          package com.aicall.assistant
+
+          import android.content.Context
+          import android.os.Build
+          import android.telecom.Call
+          import android.telecom.CallScreeningService
+          import androidx.annotation.RequiresApi
+
+          @RequiresApi(Build.VERSION_CODES.N)
+          class CustomCallScreeningService : CallScreeningService() {
+              override fun onScreenCall(callDetails: Call.Details) {
+                  val rawNumber = callDetails.handle?.schemeSpecificPart ?: ""
+                  val prefs = getSharedPreferences("AI_CALL_PREFS", Context.MODE_PRIVATE)
+                  val aiNumbers = prefs.getStringSet("AI_NUMBERS", emptySet()) ?: emptySet()
+
+                  val isAiTarget = aiNumbers.any { rawNumber.contains(it) }
+
+                  val response = CallResponse.Builder()
+                  if (isAiTarget) {
+                      // AI Intercept Logic: Call ko silence karke auto-screen mode par bhejna
+                      response.setSilenceCall(true)
+                  }
+                  respondToCall(callDetails, response.build())
+              }
+          }
+          EOF
+
+          # 7. Layout Activity Main
+          cat << 'EOF' > app/src/main/res/layout/activity_main.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:orientation="vertical"
+              android:padding="24dp">
+
+              <EditText
+                  android:id="@+id/etPhoneNumber"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_wrap"
+                  android:hint="Enter Number for AI Call Handling"
+                  android:inputType="phone"/>
+
+              <Button
+                  android:id="@+id/btnAddNumber"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="16dp"
+                  android:text="Add to AI Screening List"/>
+          </LinearLayout>
+          EOF
+
+          # 8. Strings XML
+          cat << 'EOF' > app/src/main/res/values/strings.xml
+          <resources>
+              <string name="app_name">AI Call Assistant</string>
+          </resources>
+          EOF
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build APK with Gradle Wrapper
+        run: gradle assembleDebug
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Call-Assistant-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
