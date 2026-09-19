@@ -23,6 +23,7 @@ jobs:
           mkdir -p app/src/main/java/com/aicall/assistant
           mkdir -p app/src/main/res/layout
           mkdir -p app/src/main/res/values
+          mkdir -p gradle/wrapper
 
           # 1. Root Build Gradle
           cat << 'EOF' > build.gradle
@@ -31,7 +32,7 @@ jobs:
                   google()
                   mavenCentral()
               }
-              dependencies { 
+              dependencies {
                   classpath 'com.android.tools.build:gradle:8.1.4'
               }
           }
@@ -198,7 +199,7 @@ jobs:
               public void onScreenCall(Call.Details callDetails) {
                   Uri handle = callDetails.getHandle();
                   String rawNumber = handle != null ? handle.getSchemeSpecificPart() : "";
-                  
+
                   SharedPreferences prefs = getSharedPreferences("AI_CALL_PREFS", Context.MODE_PRIVATE);
                   Set<String> aiNumbers = prefs.getStringSet("AI_NUMBERS", new HashSet<>());
 
@@ -231,14 +232,14 @@ jobs:
               <EditText
                   android:id="@+id/etPhoneNumber"
                   android:layout_width="match_parent"
-                  android:layout_height="wrap_wrap"
+                  android:layout_height="wrap_content"
                   android:hint="Enter Number for AI Call Handling"
                   android:inputType="phone"/>
 
               <Button
                   android:id="@+id/btnAddNumber"
                   android:layout_width="match_parent"
-                  android:layout_height="wrap_wrap"
+                  android:layout_height="wrap_content"
                   android:layout_marginTop="16dp"
                   android:text="Add to AI Screening List"/>
           </LinearLayout>
@@ -251,8 +252,8 @@ jobs:
           </resources>
           EOF
 
-          # 9. Setup Wrapper & Permissions
-          gradle wrapper --gradle-version 8.1.1
+          # 9. Setup Gradle Wrapper (Version 8.2 for AGP 8.1.4 compatibility)
+          gradle wrapper --gradle-version 8.2
           chmod +x gradlew
 
       - name: Build Debug APK
