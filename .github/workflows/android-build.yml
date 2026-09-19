@@ -18,19 +18,21 @@ jobs:
           mkdir -p app/src/main/res/layout
           mkdir -p app/src/main/res/values
 
-          # 1. Build Gradle Root
+          # 1. Build Gradle Root (Conflict Fix)
           cat << 'EOF' > build.gradle
           buildscript {
-              repositories { google(); mavenCentral() }
+              repositories {
+                  google()
+                  mavenCentral()
+              }
               dependencies { 
                   classpath 'com.android.tools.build:gradle:8.2.2'
                   classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22' 
               }
           }
-          allprojects { repositories { google(); mavenCentral() } }
           EOF
 
-          # 2. Settings Gradle
+          # 2. Settings Gradle (Clean Repository Control)
           cat << 'EOF' > settings.gradle
           pluginManagement {
               repositories {
@@ -40,7 +42,7 @@ jobs:
               }
           }
           dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
               repositories {
                   google()
                   mavenCentral()
@@ -239,13 +241,11 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Gradle Wrapper
-        run: |
-          gradle wrapper --gradle-version 8.4
-          chmod +x gradlew
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon
+        run: gradle assembleDebug --no-daemon
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
