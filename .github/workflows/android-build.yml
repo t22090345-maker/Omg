@@ -18,7 +18,7 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Generate Android Project
+      - name: Generate Pure Android Java Project
         run: |
           mkdir -p app/src/main/java/com/aicall/assistant
           mkdir -p app/src/main/res/layout
@@ -32,8 +32,7 @@ jobs:
                   mavenCentral()
               }
               dependencies { 
-                  classpath 'com.android.tools.build:gradle:8.2.2'
-                  classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22' 
+                  classpath 'com.android.tools.build:gradle:8.1.4'
               }
           }
           EOF
@@ -62,7 +61,6 @@ jobs:
           cat << 'EOF' > app/build.gradle
           plugins {
               id 'com.android.application'
-              id 'org.jetbrains.kotlin.android'
           }
           android {
               namespace 'com.aicall.assistant'
@@ -83,12 +81,8 @@ jobs:
                   sourceCompatibility JavaVersion.VERSION_17
                   targetCompatibility JavaVersion.VERSION_17
               }
-              kotlinOptions {
-                  jvmTarget = '17'
-              }
           }
           dependencies {
-              implementation 'androidx.core:core-ktx:1.12.0'
               implementation 'androidx.appcompat:appcompat:1.6.1'
           }
           EOF
@@ -130,84 +124,102 @@ jobs:
           </manifest>
           EOF
 
-          # 5. MainActivity Kotlin File
-          cat << 'EOF' > app/src/main/java/com/aicall/assistant/MainActivity.kt
-          package com.aicall.assistant
+          # 5. MainActivity Java File
+          cat << 'EOF' > app/src/main/java/com/aicall/assistant/MainActivity.java
+          package com.aicall.assistant;
 
-          import android.app.role.RoleManager
-          import android.content.Context
-          import android.os.Build
-          import android.os.Bundle
-          import android.widget.Button
-          import android.widget.EditText
-          import android.widget.Toast
-          import androidx.appcompat.app.AppCompatActivity
+          import android.app.role.RoleManager;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.widget.Button;
+          import android.widget.EditText;
+          import android.widget.Toast;
+          import androidx.appcompat.app.AppCompatActivity;
+          import java.util.HashSet;
+          import java.util.Set;
 
-          class MainActivity : AppCompatActivity() {
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  setContentView(R.layout.activity_main)
+          public class MainActivity extends AppCompatActivity {
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  setContentView(R.layout.activity_main);
 
-                  requestDefaultDialerRole()
+                  requestDefaultDialerRole();
 
-                  val etNumber = findViewById<EditText>(R.id.etPhoneNumber)
-                  val btnAdd = findViewById<Button>(R.id.btnAddNumber)
+                  EditText etNumber = findViewById(R.id.etPhoneNumber);
+                  Button btnAdd = findViewById(R.id.btnAddNumber);
 
-                  btnAdd.setOnClickListener {
-                      val num = etNumber.text.toString().trim()
-                      if (num.isNotEmpty()) {
-                          val prefs = getSharedPreferences("AI_CALL_PREFS", Context.MODE_PRIVATE)
-                          val set = prefs.getStringSet("AI_NUMBERS", mutableSetOf()) ?: mutableSetOf()
-                          val newSet = HashSet(set)
-                          newSet.add(num)
-                          prefs.edit().putStringSet("AI_NUMBERS", newSet).apply()
-                          Toast.makeText(this, "Number AI Screening List Me Add Ho Gaya", Toast.LENGTH_SHORT).show()
-                          etNumber.text.clear()
+                  btnAdd.setOnClickListener(v -> {
+                      String num = etNumber.getText().toString().trim();
+                      if (!num.isEmpty()) {
+                          SharedPreferences prefs = getSharedPreferences("AI_CALL_PREFS", Context.MODE_PRIVATE);
+                          Set<String> set = prefs.getStringSet("AI_NUMBERS", new HashSet<>());
+                          Set<String> newSet = new HashSet<>(set);
+                          newSet.add(num);
+                          prefs.edit().putStringSet("AI_NUMBERS", newSet).apply();
+                          Toast.makeText(this, "Number AI Screening List Me Add Ho Gaya", Toast.LENGTH_SHORT).show();
+                          etNumber.setText("");
                       }
-                  }
+                  });
               }
 
-              private fun requestDefaultDialerRole() {
+              private void requestDefaultDialerRole() {
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                      val roleManager = getSystemService(RoleManager::class.java)
+                      RoleManager roleManager = getSystemService(RoleManager.class);
                       if (roleManager != null && !roleManager.isRoleHeld(RoleManager.ROLE_DIALER)) {
-                          val intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_DIALER)
-                          startActivityForResult(intent, 1001)
+                          Intent intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_DIALER);
+                          startActivityForResult(intent, 1001);
                       }
                   }
               }
           }
           EOF
 
-          # 6. Call Screening Service
-          cat << 'EOF' > app/src/main/java/com/aicall/assistant/CustomCallScreeningService.kt
-          package com.aicall.assistant
+          # 6. Call Screening Service Java File
+          cat << 'EOF' > app/src/main/java/com/aicall/assistant/CustomCallScreeningService.java
+          package com.aicall.assistant;
 
-          import android.content.Context
-          import android.os.Build
-          import android.telecom.Call
-          import android.telecom.CallScreeningService
-          import androidx.annotation.RequiresApi
+          import android.content.Context;
+          import android.content.SharedPreferences;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.telecom.Call;
+          import android.telecom.CallScreeningService;
+          import androidx.annotation.RequiresApi;
+          import java.util.HashSet;
+          import java.util.Set;
 
-          @RequiresApi(Build.VERSION_CODES.N)
-          class CustomCallScreeningService : CallScreeningService() {
-              override fun onScreenCall(callDetails: Call.Details) {
-                  val rawNumber = callDetails.handle?.schemeSpecificPart ?: ""
-                  val prefs = getSharedPreferences("AI_CALL_PREFS", Context.MODE_PRIVATE)
-                  val aiNumbers = prefs.getStringSet("AI_NUMBERS", emptySet()) ?: emptySet()
+          @RequiresApi(api = Build.VERSION_CODES.N)
+          public class CustomCallScreeningService extends CallScreeningService {
+              @Override
+              public void onScreenCall(Call.Details callDetails) {
+                  Uri handle = callDetails.getHandle();
+                  String rawNumber = handle != null ? handle.getSchemeSpecificPart() : "";
+                  
+                  SharedPreferences prefs = getSharedPreferences("AI_CALL_PREFS", Context.MODE_PRIVATE);
+                  Set<String> aiNumbers = prefs.getStringSet("AI_NUMBERS", new HashSet<>());
 
-                  val isAiTarget = aiNumbers.any { rawNumber.contains(it) }
-
-                  val response = CallResponse.Builder()
-                  if (isAiTarget) {
-                      response.setSilenceCall(true)
+                  boolean isAiTarget = false;
+                  for (String num : aiNumbers) {
+                      if (rawNumber.contains(num)) {
+                          isAiTarget = true;
+                          break;
+                      }
                   }
-                  respondToCall(callDetails, response.build())
+
+                  CallResponse.Builder response = new CallResponse.Builder();
+                  if (isAiTarget) {
+                      response.setSilenceCall(true);
+                  }
+                  respondToCall(callDetails, response.build());
               }
           }
           EOF
 
-          # 7. Layout Activity Main
+          # 7. Layout Main XML
           cat << 'EOF' > app/src/main/res/layout/activity_main.xml
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -239,8 +251,8 @@ jobs:
           </resources>
           EOF
 
-          # 9. Setup Gradle Wrapper
-          gradle wrapper --gradle-version 8.4
+          # 9. Setup Wrapper & Permissions
+          gradle wrapper --gradle-version 8.1.1
           chmod +x gradlew
 
       - name: Build Debug APK
