@@ -29,7 +29,7 @@ jobs:
           mkdir -p app/src/main/res/layout
           mkdir -p app/src/main/res/values
 
-          # 0. Gradle Properties (AndroidX Enable)
+          # 0. Gradle Properties
           cat << 'EOF' > gradle.properties
           android.useAndroidX=true
           android.enableJetifier=true
@@ -99,7 +99,7 @@ jobs:
           }
           EOF
 
-          # 4. Android Manifest
+          # 4. Android Manifest (InCallService + Permissions)
           cat << 'EOF' > app/src/main/AndroidManifest.xml
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
               package="com.aicall.assistant">
@@ -124,12 +124,19 @@ jobs:
                       </intent-filter>
                   </activity>
 
+                  <!-- ✅ InCallService for answering calls and playing TTS -->
                   <service
-                      android:name=".CustomCallScreeningService"
-                      android:permission="android.permission.BIND_SCREENING_SERVICE"
+                      android:name=".MyInCallService"
+                      android:permission="android.permission.BIND_INCALL_SERVICE"
                       android:exported="true">
+                      <meta-data
+                          android:name="android.telecom.IN_CALL_SERVICE_UI"
+                          android:value="true" />
+                      <meta-data
+                          android:name="android.telecom.IN_CALL_SERVICE_RINGING"
+                          android:value="true" />
                       <intent-filter>
-                          <action android:name="android.telecom.CallScreeningService" />
+                          <action android:name="android.telecom.InCallService" />
                       </intent-filter>
                   </service>
 
@@ -137,7 +144,7 @@ jobs:
           </manifest>
           EOF
 
-          # 5. MainActivity Java File (Fixed Role & UI Update)
+          # 5. MainActivity Java File (Contacts Picker + UI)
           cat << 'EOF' > app/src/main/java/com/aicall/assistant/MainActivity.java
           package com.aicall.assistant;
 
@@ -145,10 +152,12 @@ jobs:
           import android.content.Context;
           import android.content.Intent;
           import android.content.SharedPreferences;
+          import android.database.Cursor;
+          import android.net.Uri;
           import android.os.Build;
           import android.os.Bundle;
+          import android.provider.ContactsContract;
           import android.widget.Button;
-          import android.widget.EditText;
           import android.widget.TextView;
           import android.widget.Toast;
           import androidx.appcompat.app.AppCompatActivity;
@@ -156,6 +165,7 @@ jobs:
           import java.util.Set;
 
           public class MainActivity extends AppCompatActivity {
+              private static final int PICK_CONTACT = 100;
               private TextView tvSavedNumbers;
 
               @Override
@@ -165,41 +175,57 @@ jobs:
 
                   tvSavedNumbers = findViewById(R.id.tvSavedNumbers);
                   loadSavedNumbers();
-                  requestCallScreeningRole(); // ✅ FIXED: Call Screening Role
+                  requestDefaultDialerRole();
 
-                  EditText etNumber = findViewById(R.id.etPhoneNumber);
-                  Button btnAdd = findViewById(R.id.btnAddNumber);
+                  Button btnPickContact = findViewById(R.id.btnPickContact);
 
-                  btnAdd.setOnClickListener(v -> {
-                      String num = etNumber.getText().toString().trim();
-                      if (!num.isEmpty()) {
+                  btnPickContact.setOnClickListener(v -> {
+                      Intent intent = new Intent(Intent.ACTION_PICK,
+                          ContactsContract.CommonDataKinds.Phone.CONTENT_URI);
+                      startActivityForResult(intent, PICK_CONTACT);
+                  });
+              }
+
+              @Override
+              protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+                  super.onActivityResult(requestCode, resultCode, data);
+                  if (requestCode == PICK_CONTACT && resultCode == RESULT_OK) {
+                      Uri contactData = data.getData();
+                      Cursor cursor = getContentResolver().query(contactData, null, null, null, null);
+                      if (cursor != null && cursor.moveToFirst()) {
+                          String number = cursor.getString(cursor.getColumnIndexOrThrow(
+                              ContactsContract.CommonDataKinds.Phone.NUMBER));
+                          String name = cursor.getString(cursor.getColumnIndexOrThrow(
+                              ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME));
+
                           SharedPreferences prefs = getSharedPreferences("AI_CALL_PREFS", Context.MODE_PRIVATE);
                           Set<String> set = prefs.getStringSet("AI_NUMBERS", new HashSet<>());
                           Set<String> newSet = new HashSet<>(set);
-                          newSet.add(num);
+                          newSet.add(number);
                           prefs.edit().putStringSet("AI_NUMBERS", newSet).apply();
-                          Toast.makeText(this, "Number Added!", Toast.LENGTH_SHORT).show();
-                          etNumber.setText("");
+
+                          Toast.makeText(this, name + " added!", Toast.LENGTH_SHORT).show();
                           loadSavedNumbers();
                       }
-                  });
+                      if (cursor != null) cursor.close();
+                  }
               }
 
               private void loadSavedNumbers() {
                   SharedPreferences prefs = getSharedPreferences("AI_CALL_PREFS", Context.MODE_PRIVATE);
                   Set<String> set = prefs.getStringSet("AI_NUMBERS", new HashSet<>());
                   if (set.isEmpty()) {
-                      tvSavedNumbers.setText("No numbers added yet.");
+                      tvSavedNumbers.setText("No contacts selected yet.");
                   } else {
-                      tvSavedNumbers.setText("Saved Numbers:\n" + String.join("\n", set));
+                      tvSavedNumbers.setText("Selected Contacts:\n" + String.join("\n", set));
                   }
               }
 
-              private void requestCallScreeningRole() {
+              private void requestDefaultDialerRole() {
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                       RoleManager roleManager = getSystemService(RoleManager.class);
-                      if (roleManager != null && !roleManager.isRoleHeld(RoleManager.ROLE_CALL_SCREENING)) {
-                          Intent intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING);
+                      if (roleManager != null && !roleManager.isRoleHeld(RoleManager.ROLE_DIALER)) {
+                          Intent intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_DIALER);
                           startActivityForResult(intent, 1001);
                       }
                   }
@@ -207,48 +233,84 @@ jobs:
           }
           EOF
 
-          # 6. Call Screening Service Java File
-          cat << 'EOF' > app/src/main/java/com/aicall/assistant/CustomCallScreeningService.java
+          # 6. MyInCallService Java File (Answers call + TTS)
+          cat << 'EOF' > app/src/main/java/com/aicall/assistant/MyInCallService.java
           package com.aicall.assistant;
 
           import android.content.Context;
           import android.content.SharedPreferences;
           import android.net.Uri;
           import android.os.Build;
+          import android.speech.tts.TextToSpeech;
           import android.telecom.Call;
-          import android.telecom.CallScreeningService;
+          import android.telecom.InCallService;
+          import android.telecom.VideoProfile;
           import androidx.annotation.RequiresApi;
           import java.util.HashSet;
+          import java.util.Locale;
           import java.util.Set;
 
-          @RequiresApi(api = Build.VERSION_CODES.N)
-          public class CustomCallScreeningService extends CallScreeningService {
+          @RequiresApi(api = Build.VERSION_CODES.O)
+          public class MyInCallService extends InCallService {
+              private TextToSpeech tts;
+
               @Override
-              public void onScreenCall(Call.Details callDetails) {
-                  Uri handle = callDetails.getHandle();
-                  String rawNumber = handle != null ? handle.getSchemeSpecificPart() : "";
+              public void onCreate() {
+                  super.onCreate();
+                  tts = new TextToSpeech(this, status -> {
+                      if (status == TextToSpeech.SUCCESS) {
+                          tts.setLanguage(Locale.US);
+                      }
+                  });
+              }
 
-                  SharedPreferences prefs = getSharedPreferences("AI_CALL_PREFS", Context.MODE_PRIVATE);
-                  Set<String> aiNumbers = prefs.getStringSet("AI_NUMBERS", new HashSet<>());
+              @Override
+              public void onCallAdded(Call call) {
+                  if (call.getDetails().getState() == Call.STATE_RINGING) {
+                      Uri handle = call.getDetails().getHandle();
+                      String rawNumber = handle != null ? handle.getSchemeSpecificPart() : "";
 
-                  boolean isAiTarget = false;
-                  for (String num : aiNumbers) {
-                      if (rawNumber.contains(num)) {
-                          isAiTarget = true;
-                          break;
+                      SharedPreferences prefs = getSharedPreferences("AI_CALL_PREFS", Context.MODE_PRIVATE);
+                      Set<String> aiNumbers = prefs.getStringSet("AI_NUMBERS", new HashSet<>());
+
+                      boolean isSelected = false;
+                      for (String num : aiNumbers) {
+                          if (rawNumber.contains(num)) {
+                              isSelected = true;
+                              break;
+                          }
+                      }
+
+                      if (isSelected) {
+                          // ✅ Answer the call automatically
+                          call.answer(VideoProfile.STATE_AUDIO_ONLY);
+
+                          // ✅ Play AI announcement using TTS
+                          String announcement = "Hello, this is an AI assistant. The person you are calling is currently busy. Please leave a message after the beep.";
+                          tts.speak(announcement, TextToSpeech.QUEUE_FLUSH, null, "AI_ANNOUNCE");
                       }
                   }
+              }
 
-                  CallResponse.Builder response = new CallResponse.Builder();
-                  if (isAiTarget) {
-                      response.setSilenceCall(true); // Call ko silent karega
+              @Override
+              public void onCallRemoved(Call call) {
+                  super.onCallRemoved(call);
+                  if (tts != null) {
+                      tts.stop();
                   }
-                  respondToCall(callDetails, response.build());
+              }
+
+              @Override
+              public void onDestroy() {
+                  if (tts != null) {
+                      tts.shutdown();
+                  }
+                  super.onDestroy();
               }
           }
           EOF
 
-          # 7. Layout Main XML (Updated UI)
+          # 7. Layout Main XML
           cat << 'EOF' > app/src/main/res/layout/activity_main.xml
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -257,19 +319,11 @@ jobs:
               android:orientation="vertical"
               android:padding="24dp">
 
-              <EditText
-                  android:id="@+id/etPhoneNumber"
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:hint="Enter Number to Silence Call"
-                  android:inputType="phone"/>
-
               <Button
-                  android:id="@+id/btnAddNumber"
+                  android:id="@+id/btnPickContact"
                   android:layout_width="match_parent"
                   android:layout_height="wrap_content"
-                  android:layout_marginTop="16dp"
-                  android:text="Add to AI Screening List"/>
+                  android:text="Select Contact for AI Announcement"/>
 
               <TextView
                   android:id="@+id/tvSavedNumbers"
@@ -277,7 +331,7 @@ jobs:
                   android:layout_height="wrap_content"
                   android:layout_marginTop="24dp"
                   android:textSize="16sp"
-                  android:text="No numbers added yet."/>
+                  android:text="No contacts selected yet."/>
           </LinearLayout>
           EOF
 
