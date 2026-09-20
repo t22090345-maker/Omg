@@ -31,6 +31,13 @@ jobs:
           mkdir -p app/src/main/res/values
           mkdir -p gradle/wrapper
 
+          # 0. ✅ YEH GRADLE.PROPERTIES FILE ANDROIDX ENABLE KAREGI
+          cat << 'EOF' > gradle.properties
+          android.useAndroidX=true
+          android.enableJetifier=true
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          EOF
+
           # 1. Root Build Gradle
           cat << 'EOF' > build.gradle
           buildscript {
