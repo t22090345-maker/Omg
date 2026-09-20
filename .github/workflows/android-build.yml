@@ -18,7 +18,6 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      # ✅ YEH STEP GRADLE VERSION KO 8.2 PAR LOCK KAREGA
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -29,9 +28,8 @@ jobs:
           mkdir -p app/src/main/java/com/aicall/assistant
           mkdir -p app/src/main/res/layout
           mkdir -p app/src/main/res/values
-          mkdir -p gradle/wrapper
 
-          # 0. ✅ YEH GRADLE.PROPERTIES FILE ANDROIDX ENABLE KAREGI
+          # 0. Gradle Properties (AndroidX Enable)
           cat << 'EOF' > gradle.properties
           android.useAndroidX=true
           android.enableJetifier=true
@@ -110,6 +108,7 @@ jobs:
               <uses-permission android:name="android.permission.READ_CALL_LOG"/>
               <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS"/>
               <uses-permission android:name="android.permission.MANAGE_OWN_CALLS"/>
+              <uses-permission android:name="android.permission.READ_CONTACTS"/>
 
               <application
                   android:allowBackup="true"
@@ -138,7 +137,7 @@ jobs:
           </manifest>
           EOF
 
-          # 5. MainActivity Java File
+          # 5. MainActivity Java File (Fixed Role & UI Update)
           cat << 'EOF' > app/src/main/java/com/aicall/assistant/MainActivity.java
           package com.aicall.assistant;
 
@@ -150,18 +149,23 @@ jobs:
           import android.os.Bundle;
           import android.widget.Button;
           import android.widget.EditText;
+          import android.widget.TextView;
           import android.widget.Toast;
           import androidx.appcompat.app.AppCompatActivity;
           import java.util.HashSet;
           import java.util.Set;
 
           public class MainActivity extends AppCompatActivity {
+              private TextView tvSavedNumbers;
+
               @Override
               protected void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
                   setContentView(R.layout.activity_main);
 
-                  requestDefaultDialerRole();
+                  tvSavedNumbers = findViewById(R.id.tvSavedNumbers);
+                  loadSavedNumbers();
+                  requestCallScreeningRole(); // ✅ FIXED: Call Screening Role
 
                   EditText etNumber = findViewById(R.id.etPhoneNumber);
                   Button btnAdd = findViewById(R.id.btnAddNumber);
@@ -174,17 +178,28 @@ jobs:
                           Set<String> newSet = new HashSet<>(set);
                           newSet.add(num);
                           prefs.edit().putStringSet("AI_NUMBERS", newSet).apply();
-                          Toast.makeText(this, "Number AI Screening List Me Add Ho Gaya", Toast.LENGTH_SHORT).show();
+                          Toast.makeText(this, "Number Added!", Toast.LENGTH_SHORT).show();
                           etNumber.setText("");
+                          loadSavedNumbers();
                       }
                   });
               }
 
-              private void requestDefaultDialerRole() {
+              private void loadSavedNumbers() {
+                  SharedPreferences prefs = getSharedPreferences("AI_CALL_PREFS", Context.MODE_PRIVATE);
+                  Set<String> set = prefs.getStringSet("AI_NUMBERS", new HashSet<>());
+                  if (set.isEmpty()) {
+                      tvSavedNumbers.setText("No numbers added yet.");
+                  } else {
+                      tvSavedNumbers.setText("Saved Numbers:\n" + String.join("\n", set));
+                  }
+              }
+
+              private void requestCallScreeningRole() {
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                       RoleManager roleManager = getSystemService(RoleManager.class);
-                      if (roleManager != null && !roleManager.isRoleHeld(RoleManager.ROLE_DIALER)) {
-                          Intent intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_DIALER);
+                      if (roleManager != null && !roleManager.isRoleHeld(RoleManager.ROLE_CALL_SCREENING)) {
+                          Intent intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING);
                           startActivityForResult(intent, 1001);
                       }
                   }
@@ -226,14 +241,14 @@ jobs:
 
                   CallResponse.Builder response = new CallResponse.Builder();
                   if (isAiTarget) {
-                      response.setSilenceCall(true);
+                      response.setSilenceCall(true); // Call ko silent karega
                   }
                   respondToCall(callDetails, response.build());
               }
           }
           EOF
 
-          # 7. Layout Main XML
+          # 7. Layout Main XML (Updated UI)
           cat << 'EOF' > app/src/main/res/layout/activity_main.xml
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -246,7 +261,7 @@ jobs:
                   android:id="@+id/etPhoneNumber"
                   android:layout_width="match_parent"
                   android:layout_height="wrap_content"
-                  android:hint="Enter Number for AI Call Handling"
+                  android:hint="Enter Number to Silence Call"
                   android:inputType="phone"/>
 
               <Button
@@ -255,6 +270,14 @@ jobs:
                   android:layout_height="wrap_content"
                   android:layout_marginTop="16dp"
                   android:text="Add to AI Screening List"/>
+
+              <TextView
+                  android:id="@+id/tvSavedNumbers"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="24dp"
+                  android:textSize="16sp"
+                  android:text="No numbers added yet."/>
           </LinearLayout>
           EOF
 
@@ -265,7 +288,7 @@ jobs:
           </resources>
           EOF
 
-          # 9. Setup Gradle Wrapper (Version 8.2 for AGP 8.1.4 compatibility)
+          # 9. Setup Gradle Wrapper
           gradle wrapper --gradle-version 8.2
           chmod +x gradlew
 
